@@ -1,0 +1,39 @@
+{
+  "cohort": "A2",
+  "policy": {
+    "kind": "threshold",
+    "tau": 0.29515252254945584
+  },
+  "n_edges": 1736248,
+  "n_required": 88181,
+  "macro_f": 0.9748735211183608,
+  "oracle_macro_f": 0.9852836028137405,
+  "oracle": 0.9852836028137405,
+  "blocking_loss": 0.0147163971862595,
+  "scoring_loss": 0.010410081695379714,
+  "pair_tp": 287962,
+  "pair_fp": 1694,
+  "pair_fn": 16936,
+  "n_truth_empty": 4995,
+  "n_pred_empty": 5392,
+  "n_cand_empty": 3208,
+  "slices": {
+    "country:India": {
+      "n": 35160,
+      "macro_f": 0.9613453803510809
+    },
+    "country:US": {
+      "n": 53021,
+      "macro_f": 0.983844484121363
+    },
+    "singletons": {
+      "n": 4995,
+      "macro_f": 0.974974974974975
+    },
+    "linked": {
+      "n": 83186,
+      "macro_f": 0.9748674292037458
+    }
+  },
+  "elapsed_seconds": 17.4
+}

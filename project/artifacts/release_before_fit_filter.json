@@ -1,0 +1,14 @@
+{
+  "policy": {
+    "kind": "threshold",
+    "tau": 0.5361678414526758
+  },
+  "calibrator": {
+    "a": -23.540091425154365,
+    "b": 3.4106250778678144
+  },
+  "model_fingerprint": "95e48a10fd0a492682216a84186c103d07cf66b1664ce4194c3c0a34ea3a8874",
+  "feature_version": "v1",
+  "retrieval_version": "v3",
+  "selected_on": "K"
+}

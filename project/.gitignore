@@ -1,0 +1,6 @@
+#/project/data/
+#project/output/
+__pycache__/
+*.pyc
+.DS_Store
+nohup.out

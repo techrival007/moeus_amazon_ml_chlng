@@ -1,0 +1,20 @@
+{
+  "policy": {
+    "kind": "threshold",
+    "tau": 0.25838184823029714
+  },
+  "calibrator": {
+    "a": -11.974582259536854,
+    "b": 3.4148314633490218
+  },
+  "model_fingerprint": "383e7a29a1e01a6802a23dc5aa9fc336dd398f20d9c5ccb7bd67dcd1a1a01954",
+  "feature_version": "v4",
+  "retrieval_version": "v4",
+  "retrieval_recipe": {
+    "budget": 2,
+    "lane_k": 8,
+    "max_terms": 16,
+    "joint_k": 2
+  },
+  "selected_on": "K"
+}
