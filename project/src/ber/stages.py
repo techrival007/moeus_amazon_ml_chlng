@@ -36,7 +36,7 @@ from ber.training import TrainConfig, load_model, train_model
 
 RETRIEVAL_VERSION = "v4"
 MAX_TERMS = 16
-FEATURE_VERSION = "v4"
+FEATURE_VERSION = "v6"
 DFMAP_VERSION = "v2"
 LANE_K = 8
 BUDGET = 2

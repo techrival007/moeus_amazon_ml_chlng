@@ -18,7 +18,7 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 DEFAULT_DATASET = REPO_ROOT / "student_resource" / "dataset"
 DEFAULT_VALIDATOR = REPO_ROOT / "student_resource" / "utils" / "validate_submission.py"
 
-COHORT_ROLES = {"fit": "F", "D": "D", "K": "K", "A": "A", "A2": "A2", "test": None}
+COHORT_ROLES = {"fit": "F", "D": "D", "K": "K", "A": "A", "A2": "A2", "test": None, "W": None, "Wm": None}
 
 
 def _data_dir(args) -> Path:
@@ -109,6 +109,16 @@ def main() -> int:
         role = COHORT_ROLES[args.cohort]
         if args.cohort == "test":
             print(json.dumps(pl.stage_env_test(data_dir, shard_size=args.shard_size), indent=2))
+        elif args.cohort == "W":
+            quotas, densities = _quotas_and_densities(data_dir)
+            print(json.dumps(pl.stage_env_dense(data_dir, "W", quotas, densities, seed=7,
+                                                shard_size=args.shard_size), indent=2))
+        elif args.cohort == "Wm":
+            # Mac-sized dense env: D+K refs + B fill, 20% of test catalog size
+            quotas, densities = _quotas_and_densities(data_dir)
+            print(json.dumps(pl.stage_env_dense(data_dir, "Wm", quotas, densities, seed=7,
+                                                shard_size=args.shard_size, scale=0.2,
+                                                held_roles=("D", "K")), indent=2))
         else:
             quotas, densities = _quotas_and_densities(data_dir)
             print(json.dumps(pl.stage_env_train(

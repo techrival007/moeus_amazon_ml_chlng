@@ -416,6 +416,115 @@ def stage_env_test(data_dir: Path, shard_size: int = 100_000) -> dict:
     return stats
 
 
+def dense_catalog_ids(ref_ids: list[str], ref_roles: list[str], quota: int,
+                      rng: np.random.Generator,
+                      held_roles: tuple[str, ...] | None = None) -> tuple[list[str], list[str]]:
+    """(catalog, ghosts): every non-B ref kept, B refs sampled up to quota.
+
+    Unchosen B refs become ghosts: their targets stay available as ownerless
+    distractors, exactly like test targets whose business has no S1 record.
+    """
+    held = [r for r, role in zip(ref_ids, ref_roles)
+            if role != "B" and (held_roles is None or role in held_roles)]
+    pool = sorted(r for r, role in zip(ref_ids, ref_roles) if role == "B")
+    need = max(0, quota - len(held))
+    pick = set(rng.permutation(len(pool))[:need].tolist()) if pool else set()
+    chosen = [pool[i] for i in sorted(pick)]
+    ghosts = [pool[i] for i in range(len(pool)) if i not in pick]
+    return sorted(held + chosen), ghosts
+
+
+def dense_traffic_ids(target_ids: list[str], owner_of: dict[str, str],
+                      catalog: set[str], quota: int,
+                      rng: np.random.Generator) -> tuple[list[str], int, int]:
+    """(traffic, n_owned, n_orphan): all catalog-owned targets + orphan fill.
+
+    Orphans are unlinked targets and targets owned by refs outside the
+    catalog; they fill the per-source quota (test density * catalog size).
+    """
+    owned = [t for t in target_ids if owner_of.get(t) in catalog]
+    orphans = sorted(t for t in target_ids if owner_of.get(t) not in catalog)
+    need = max(0, quota - len(owned))
+    take = min(need, len(orphans))
+    pick = np.sort(rng.permutation(len(orphans))[:take])
+    return sorted(owned + [orphans[i] for i in pick]), len(owned), int(take)
+
+
+def stage_env_dense(data_dir: Path, cohort: str, quotas: dict[str, int],
+                    densities: dict[str, dict[int, float]], seed: int = 7,
+                    shard_size: int = 100_000, scale: float = 1.0,
+                    held_roles: tuple[str, ...] | None = None) -> dict:
+    """Test-faithful dense environment over the whole training set.
+
+    Catalog per country: all D/K/A/A2/F refs + B fill to the test catalog
+    size. Traffic: every target owned by a catalog ref plus orphans up to
+    the observed test target density *per catalog ref* (not per focal ref),
+    so each reference sees its siblings' and ownerless records as on test.
+    """
+    data_dir = Path(data_dir)
+    env_dir = data_dir / "env" / cohort
+    env_dir.mkdir(parents=True, exist_ok=True)
+    stats: dict[str, Any] = {"cohort": cohort, "dense": True, "countries": {}}
+    rng = np.random.default_rng(seed)
+    t0 = time.perf_counter()
+
+    man = pq.read_table(data_dir / "manifest" / "split.parquet",
+                        columns=["entity_id", "source", "role", "country"])
+    anchors = man.filter(pc.equal(man.column("source"), 1))
+    del man
+    owner_of: dict[str, str] = {}
+    for sid, ids in iter_truth_parquet(data_dir / "records" / "truth.parquet"):
+        for t in ids:
+            owner_of[t] = sid
+
+    s1 = pq.read_table(data_dir / "records" / "train_s1.parquet")
+    catalog_all: set[str] = set()
+    n_catalog: dict[str, int] = {}
+    for country in countries_of(anchors):
+        sub_a = anchors.filter(pc.equal(anchors.column("country"), country))
+        chosen, ghosts = dense_catalog_ids(sub_a.column("entity_id").to_pylist(),
+                                           sub_a.column("role").to_pylist(),
+                                           int(round(quotas.get(country, 0) * scale)), rng,
+                                           held_roles)
+        catalog_all.update(chosen)
+        sub = s1.filter(pc.is_in(s1.column("entity_id"), value_set=_id_array(set(chosen))))
+        sub = sub.sort_by("ordinal")
+        _write_catalog(env_dir, country, sub)
+        n_catalog[country] = sub.num_rows
+        stats["countries"][country] = {"refs": sub.num_rows, "ghost_refs": len(ghosts),
+                                       "quota": quotas.get(country, 0)}
+    del s1, anchors
+    stats["total_refs"] = sum(n_catalog.values())
+
+    total_targets = 0
+    for source in (2, 3):
+        t = pq.read_table(data_dir / "records" / f"train_s{source}.parquet")
+        for country in sorted(n_catalog):
+            mask = pc.equal(t.column("country"), country)
+            country_ids = t.column("entity_id").filter(mask).to_pylist()
+            quota = int(round(densities.get(country, {}).get(source, 0.0) * n_catalog[country]))
+            traffic, n_owned, n_orphan = dense_traffic_ids(country_ids, owner_of,
+                                                           catalog_all, quota, rng)
+            sub = t.filter(pc.is_in(t.column("entity_id"), value_set=_id_array(set(traffic))))
+            sub = sub.sort_by("ordinal")
+            shards = _write_traffic_shards(env_dir, country, sub, source, shard_size)
+            c = stats["countries"][country]
+            c[f"s{source}_quota"] = quota
+            c[f"s{source}_owned"] = n_owned
+            c[f"s{source}_orphans"] = n_orphan
+            c[f"s{source}_shards"] = shards
+            total_targets += len(traffic)
+        del t
+    for c in stats["countries"].values():
+        n = c.get("s2_owned", 0) + c.get("s2_orphans", 0) + c.get("s3_owned", 0) + c.get("s3_orphans", 0)
+        c["targets_per_ref"] = n / max(c["refs"], 1)
+        c["ownerless_fraction"] = (c.get("s2_orphans", 0) + c.get("s3_orphans", 0)) / max(n, 1)
+    stats["total_targets"] = total_targets
+    stats["elapsed_seconds"] = round(time.perf_counter() - t0, 1)
+    _report(env_dir / "env.json", stats)
+    return stats
+
+
 def stage_env_train(data_dir: Path, cohort: str, role: str,
                     quotas: dict[str, int], densities: dict[str, dict[int, float]],
                     seed: int = 7, shard_size: int = 100_000) -> dict:

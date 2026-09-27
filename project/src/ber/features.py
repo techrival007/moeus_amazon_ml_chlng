@@ -9,12 +9,14 @@ Entity-id numeric suffixes never enter features; only the source prefix does.
 from __future__ import annotations
 
 import math
+import re
 from collections.abc import Mapping
 from typing import Any
 
 from rapidfuzz.distance import JaroWinkler, Levenshtein
 
-from ber.normalize import tokens
+from ber.normalize import latin_accent_fold, tokens
+from ber.translit import skeleton, skeleton_token
 from ber.records import RecordViews
 
 FEATURE_NAMES: tuple[str, ...] = (
@@ -60,9 +62,49 @@ FEATURE_NAMES: tuple[str, ...] = (
     "joint_score",
     # meta
     "source_s2",
+    # v5: sibling/near-twin discrimination (single-digit numbers, accents,
+    # legal-suffix-free name core)
+    "addr_num_jaccard_all",
+    "addr_num_conflict",
+    "addr_first_num_eq",
+    "addr_num_symdiff",
+    "name_fold_jw",
+    "addr_fold_jw",
+    "name_core_jaccard",
+    "name_core_exact",
+    "name_core_missing_tokens",
+    # v6: cross-script consonant skeletons (Indic -> Latin transliteration)
+    "name_skel_jaccard",
+    "name_skel_jw",
+    "name_skel_core_jaccard",
+    "addr_skel_jaccard",
 )
 
 _BOOL = (True, False)
+
+_NUM = re.compile(r"\d+")
+
+# legal forms and generic business words, several languages; dropped to expose
+# the distinctive name core ("advik farms" vs "advik properties")
+_GENERIC = frozenset("""
+llc inc ltd pvt private limited corp corporation co company companies
+sarl sas sasu eurl sa sci snc selarl scop llp lp plc gmbh the and et
+de la le les du des of group holding holdings services service center
+centre international india industries enterprises partners associates
+mr mrs smt shri sri dr ms m s dba formerly known as
+""".split())
+
+
+_GENERIC_SKEL = frozenset(skeleton_token(w) for w in _GENERIC) - {""}
+
+
+def _nums(norm: str) -> list[str]:
+    """All digit runs (single digits included), leading zeros stripped."""
+    return [n.lstrip("0") or "0" for n in _NUM.findall(norm)]
+
+
+def _core(tokset: frozenset[str]) -> frozenset[str]:
+    return frozenset(t for t in tokset if t not in _GENERIC)
 
 
 def _tokset(norm: str) -> frozenset[str]:
@@ -143,6 +185,21 @@ def pair_features(
 
     shared_numeric = len(rnum & tnum)
 
+    rn_all, tn_all = _nums(ra), _nums(ta)
+    rns, tns = frozenset(rn_all), frozenset(tn_all)
+    if rn_all and tn_all:
+        first_eq = 1.0 if rn_all[0] == tn_all[0] else 0.0
+        num_conflict = 1.0 if not (rns & tns) else 0.0
+    else:
+        first_eq, num_conflict = -1.0, 0.0
+    rf, tf = latin_accent_fold(rn), latin_accent_fold(tn)
+    rfa, tfa = latin_accent_fold(ra), latin_accent_fold(ta)
+    rc, tc = _core(rt), _core(tt)
+    rsk, tsk = skeleton(rn), skeleton(tn)
+    rsk_set, tsk_set = frozenset(rsk), frozenset(tsk)
+    rsk_core, tsk_core = rsk_set - _GENERIC_SKEL, tsk_set - _GENERIC_SKEL
+    rask, task = frozenset(skeleton(ra)), frozenset(skeleton(ta))
+
     return [
         # name family
         float(name_jw),
@@ -186,4 +243,20 @@ def pair_features(
         float(joint_score),
         # meta
         1.0 if tgt.entity_id.startswith("S2-") else 0.0,
+        # v5
+        _jaccard(rns, tns),
+        num_conflict,
+        first_eq,
+        float(len(rns ^ tns)),
+        0.0 if name_missing else float(JaroWinkler.similarity(rf, tf)),
+        0.0 if addr_missing else float(JaroWinkler.similarity(rfa, tfa)),
+        _jaccard(rc, tc),
+        1.0 if (rc and rc == tc) else 0.0,
+        float(len(rc ^ tc)),
+        # v6
+        _jaccard(rsk_set, tsk_set),
+        (float(JaroWinkler.similarity(" ".join(sorted(rsk_set)), " ".join(sorted(tsk_set))))
+         if rsk_set and tsk_set else 0.0),
+        _jaccard(rsk_core, tsk_core),
+        0.0 if addr_missing else _jaccard(rask, task),
     ]
