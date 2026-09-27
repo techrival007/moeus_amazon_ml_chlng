@@ -310,6 +310,9 @@ fingerprints for the model files.
   supplied data. No pretrained weights were used.
 - Dependencies are numpy, pyarrow, lightgbm (MIT), tantivy (MIT),
   rapidfuzz (MIT) and scipy (BSD).
+- This repository's code is released under the [MIT License](LICENSE). The
+  competition dataset and problem statement belong to their owners and are
+  not covered by it.
 
 ## Honesty notes
 
